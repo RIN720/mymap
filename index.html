@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>홍대 굿즈샵 & 소품샵 지도 서비스</title>
+  <title>전국 굿즈샵 & 소품샵 지도 서비스</title>
 
   <!-- Kakao Map API 라이브러리 로드 (services 키워드 검색 라이브러리 포함) -->
   <script type="text/javascript" src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=8ea5fe223fa7425d3811e11663af2e54&libraries=services"></script>
@@ -284,7 +284,6 @@
      * 사용자 현재 위치를 나타내는 파란 점 마커 생성
      */
     function createUserLocationMarker(position) {
-      // SVG로 작성된 파란색 점 이미지 (Data URL)
       const blueDotSvg = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(`
         <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
           <circle cx="12" cy="12" r="9" fill="#2563EB" stroke="#ffffff" stroke-width="3"/>
@@ -354,7 +353,7 @@
      */
     function loadTabData() {
       const resultsList = document.getElementById('resultsList');
-      resultsList.innerHTML = '<p class="status-msg">내 주변 장소를 찾는 중입니다...</p>';
+      resultsList.innerHTML = '<p class="status-msg">장소를 검색하는 중입니다...</p>';
 
       if (currentTab === 'goods') {
         searchGoodsShops();
@@ -364,52 +363,53 @@
     }
 
     /**
-     * 탭 1: 지정된 굿즈샵 목록 검색
+     * 탭 1: 전국을 대상으로 지정된 굿즈샵 목록 순차 검색
      */
     function searchGoodsShops() {
       const searchResults = [];
-      let completedCount = 0;
+      let index = 0;
 
-      // 내 위치 주변을 기준으로 각 굿즈샵 개별 검색
-      goodsShopList.forEach(shopName => {
-        const searchOptions = currentPosition ? { location: currentPosition, radius: 10000 } : {};
+      // API 블록을 방지하기 위해 100ms 간격으로 하나씩 검색 진행
+      function searchNext() {
+        if (index >= goodsShopList.length) {
+          // 모든 검색이 종료되면 화면에 랜더링
+          renderSearchResults(searchResults, 'purple');
+          return;
+        }
 
+        const shopName = goodsShopList[index];
+        
+        // 특정 위치 제한 없이 전국 검색 (옵션 없음)
         placesService.keywordSearch(shopName, function (data, status) {
-          completedCount++;
-
           if (status === kakao.maps.services.Status.OK && data.length > 0) {
-            // 가장 연관성이 높은 첫 번째 장소 추가
             searchResults.push(data[0]);
           }
+          index++;
+          setTimeout(searchNext, 100);
+        });
+      }
 
-          // 모든 굿즈샵 검색 요청이 완료되었을 때 결과 출력
-          if (completedCount === goodsShopList.length) {
-            renderSearchResults(searchResults, 'purple');
-          }
-        }, searchOptions);
-      });
+      searchNext();
     }
 
     /**
-     * 탭 2: '소품샵' 키워드로 내 위치 주변 검색
+     * 탭 2: '소품샵' 키워드로 검색 (전국 단위)
      */
     function searchPropsShops() {
-      const searchOptions = currentPosition ? { location: currentPosition, radius: 5000 } : {};
-
+      // 전국 단위 검색
       placesService.keywordSearch('소품샵', function (data, status) {
         if (status === kakao.maps.services.Status.OK) {
           renderSearchResults(data, 'pink');
         } else {
-          document.getElementById('resultsList').innerHTML = '<p class="no-result">주변에 소품샵 검색 결과가 없습니다.</p>';
+          document.getElementById('resultsList').innerHTML = '<p class="no-result">소품샵 검색 결과가 없습니다.</p>';
         }
-      }, searchOptions);
+      });
     }
 
     /**
      * 마커용 SVG 커스텀 이미지 생성 함수 (보라색 / 분홍색)
      */
     function createCustomMarkerImage(colorType) {
-      // 보라색(굿즈샵): #8A2BE2, 분홍색(소품샵): #FF69B4
       const hexColor = colorType === 'purple' ? '#8A2BE2' : '#FF69B4';
 
       const svgString = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(`
@@ -457,10 +457,14 @@
         // 결과 리스트 엘리먼트 생성
         const itemEl = document.createElement('div');
         itemEl.className = 'result-item';
+
+        const phoneHtml = place.phone ? '<div class="result-phone">📞 ' + place.phone + '</div>' : '';
+        const addressText = place.road_address_name || place.address_name;
+
         itemEl.innerHTML = `
           <div class="result-title">${index + 1}. ${place.place_name}</div>
-          <div class="result-address">${place.road_address_name || place.address_name}</div>
-          ${place.phone ? `<div class="result-phone">📞 \${place.phone}</div>` : ''}
+          <div class="result-address">${addressText}</div>
+          ${phoneHtml}
         `;
 
         // 이벤트 등록: 마커 클릭 시 상세정보 팝업
@@ -477,516 +481,7 @@
         resultsList.appendChild(itemEl);
       });
 
-      // 검색된 모든 마커와 내 위치가 보이도록 지도 범위 조정
-      if (currentPosition) {
-        bounds.extend(currentPosition);
-      }
-      map.setBounds(bounds);
-    }
-
-    /**
-     * 마커 클릭 시 상세정보(이름, 주소, 전화번호)를 표시하는 팝업 함수
-     */
-    function showInfoWindow(marker, place) {
-      const address = place.road_address_name || place.address_name;
-      const phone = place.phone ? place.phone : '전화번호 정보 없음';
-
-      const content = `
-        <div class="info-window">
-          <div class="info-window-title">${place.place_name}</div>
-          <div class="info-window-address">📍 ${address}</div>
-          <div class="info-window-phone">📞 ${phone}</div>
-        </div>
-      `;
-
-      infoWindow.setContent(content);
-      infoWindow.open(map, marker);
-    }
-  </script>
-</body>
-</html><!DOCTYPE html>
-<html lang="ko">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>홍대 굿즈샵 & 소품샵 지도 서비스</title>
-
-  <!-- Kakao Map API 라이브러리 로드 (services 키워드 검색 라이브러리 포함) -->
-  <script type="text/javascript" src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=8ea5fe223fa7425d3811e11663af2e54&libraries=services"></script>
-
-  <style>
-    /* 기본 초기화 및 박스 모델 설정 */
-    * {
-      box-sizing: border-box;
-      margin: 0;
-      padding: 0;
-    }
-
-    body, html {
-      width: 100%;
-      height: 100%;
-      font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, system-ui, Roboto, sans-serif;
-    }
-
-    /* 화면 2분할 플렉스 레이아웃 */
-    .app-container {
-      display: flex;
-      width: 100vw;
-      height: 100vh;
-      overflow: hidden;
-    }
-
-    /* 왼쪽 사이드바 (탭 + 결과 리스트) */
-    .sidebar {
-      width: 380px;
-      height: 100%;
-      background-color: #ffffff;
-      display: flex;
-      flex-direction: column;
-      border-right: 1px solid #e1e4e8;
-      z-index: 10;
-      box-shadow: 2px 0 8px rgba(0, 0, 0, 0.05);
-    }
-
-    /* 상단 헤더 및 탭 영역 */
-    .header-area {
-      padding: 20px 20px 0 20px;
-      background-color: #f8f9fa;
-      border-bottom: 1px solid #e1e4e8;
-    }
-
-    .header-area h1 {
-      font-size: 1.2rem;
-      color: #333;
-      margin-bottom: 16px;
-    }
-
-    /* 탭 버튼 스타일 */
-    .tab-container {
-      display: flex;
-      gap: 8px;
-    }
-
-    .tab-btn {
-      flex: 1;
-      padding: 12px;
-      border: 1px solid #ddd;
-      border-bottom: none;
-      border-radius: 8px 8px 0 0;
-      background-color: #eee;
-      color: #666;
-      font-weight: bold;
-      font-size: 14px;
-      cursor: pointer;
-      transition: all 0.2s ease;
-    }
-
-    /* 굿즈샵 탭 활성화 (보라색 포인트) */
-    .tab-btn.active[data-tab="goods"] {
-      background-color: #8a2be2;
-      color: #ffffff;
-      border-color: #8a2be2;
-    }
-
-    /* 소품샵 탭 활성화 (분홍색 포인트) */
-    .tab-btn.active[data-tab="props"] {
-      background-color: #ff69b4;
-      color: #ffffff;
-      border-color: #ff69b4;
-    }
-
-    /* 검색 결과 리스트 영역 */
-    .results-container {
-      flex: 1;
-      overflow-y: auto;
-      padding: 12px;
-    }
-
-    .result-item {
-      padding: 14px;
-      border-bottom: 1px solid #eee;
-      border-radius: 6px;
-      cursor: pointer;
-      transition: background-color 0.2s;
-    }
-
-    .result-item:hover {
-      background-color: #f1f3f5;
-    }
-
-    .result-title {
-      font-size: 15px;
-      font-weight: bold;
-      color: #1b1c1d;
-      margin-bottom: 4px;
-    }
-
-    .result-address {
-      font-size: 13px;
-      color: #666;
-      margin-bottom: 2px;
-    }
-
-    .result-phone {
-      font-size: 12px;
-      color: #2b8a3e;
-    }
-
-    .no-result, .status-msg {
-      text-align: center;
-      color: #888;
-      margin-top: 40px;
-      font-size: 14px;
-      line-height: 1.5;
-    }
-
-    /* 오른쪽 지도 영역 */
-    .map-container {
-      flex: 1;
-      height: 100%;
-      position: relative;
-    }
-
-    #map {
-      width: 100%;
-      height: 100%;
-    }
-
-    /* 인포윈도우 커스텀 스타일 */
-    .info-window {
-      padding: 10px;
-      font-size: 12px;
-      max-width: 220px;
-      line-height: 1.4;
-    }
-
-    .info-window-title {
-      font-weight: bold;
-      font-size: 14px;
-      color: #333;
-      margin-bottom: 4px;
-    }
-
-    .info-window-address {
-      color: #666;
-      margin-bottom: 2px;
-    }
-
-    .info-window-phone {
-      color: #2b8a3e;
-    }
-  </style>
-</head>
-<body>
-
-  <div class="app-container">
-    <!-- 왼쪽 사이드바 -->
-    <div class="sidebar">
-      <div class="header-area">
-        <h1>🛍️ 굿즈샵 & 소품샵 찾기</h1>
-        <div class="tab-container">
-          <button class="tab-btn active" data-tab="goods" onclick="switchTab('goods')">💜 굿즈샵</button>
-          <button class="tab-btn" data-tab="props" onclick="switchTab('props')">🩷 소품샵</button>
-        </div>
-      </div>
-      <div id="resultsList" class="results-container">
-        <p class="status-msg">지도를 불러오는 중입니다...</p>
-      </div>
-    </div>
-
-    <!-- 오른쪽 지도 영역 -->
-    <div class="map-container">
-      <div id="map"></div>
-    </div>
-  </div>
-
-  <script>
-    // 전역 변수 선언
-    let map = null;
-    let placesService = null;
-    let currentTab = 'goods'; // 기본 선택 탭 ('goods' 또는 'props')
-    let currentPosition = null; // 사용자 현재 위치 (LatLng 객체)
-    let markers = []; // 검색 결과 마커 배열
-    let userMarker = null; // 내 위치 표시용 파란 점 마커
-    let infoWindow = null; // 마커 클릭 시 표시할 상세 정보 창
-
-    // 지정된 굿즈샵 키워드 리스트 (총 54개)
-    const goodsShopList = [
-      '유미상점', '쿠지뽑고가냥', '덕중무휴', '이치라쿠', '나폴나폴', '홍키하바라',
-      '가챠오션 홍대점', '시로가챠', '토리모상점', '라신반 서울본점', '피규어센터 2호점',
-      '본부대로', '오타쿠만물상', '꾸잉양판점', '애니플라자', '숨겨진상점', '덕모클',
-      '지지코믹마켓 홍대점', '도리무란도', '쿠지매니아 홍대점', '라스트원 홍대', '코지쿠지',
-      '호카상점', '냐냐랜드', '피규어센터 1호점', '오카에리', '쿠쿠 스페이스', '푸숍',
-      '메리모어', '두니부', '가챠오션플러스 연남점', '츄플레이', '연도문구', '도담도담',
-      '애니세카이 홍대점', '라신반 서울 1호점', '아이러브토이즈 홍대점', '더쿠 연트럴파크점',
-      '브라더굿즈 홍대', '피규어프레소 신도림점', '피규어프렌즈', '최애굿즈 홍대점',
-      '안서당', '더키월드', '모와즐 홍대점', '더꼬꼬굿즈', '원피규어', '오모차랜드 홍대2호점',
-      '애니플러스 서울합정점', '오모차랜드 홍대점', '헬로수미코', '더쿠 홍대입구점',
-      '피규어프레소 에프피점', '레인몰'
-    ];
-
-    // 카카오맵 SDK 로드 완료 후 지도 초기화
-    kakao.maps.load(function () {
-      initMap();
-    });
-
-    /**
-     * 지도 초기화 및 인포윈도우, 검색 서비스 세팅
-     */
-    function initMap() {
-      const mapContainer = document.getElementById('map');
-      
-      // 위치 권한 거부 시 기본 위치 (서울시청)
-      const defaultCenter = new kakao.maps.LatLng(37.566826, 126.978656);
-
-      const mapOptions = {
-        center: defaultCenter,
-        level: 5 // 확대 레벨 5
-      };
-
-      map = new kakao.maps.Map(mapContainer, mapOptions);
-      placesService = new kakao.maps.services.Places();
-      infoWindow = new kakao.maps.InfoWindow({ zIndex: 10 });
-
-      // 사용자 위치 받아오기 및 데이터 조회 시작
-      fetchUserLocation();
-    }
-
-    /**
-     * 사용자 위치 권한 받아오기 및 지도 중심 이동 + 파란 점 마커 표시
-     */
-    function fetchUserLocation() {
-      const resultsList = document.getElementById('resultsList');
-
-      if (navigator.geolocation) {
-        navigator.geolocation.getCurrentPosition(
-          function (position) {
-            const lat = position.coords.latitude;
-            const lng = position.coords.longitude;
-            currentPosition = new kakao.maps.LatLng(lat, lng);
-
-            // 지도 중심을 내 위치로 이동
-            map.setCenter(currentPosition);
-
-            // 내 위치를 '파란 점' 형태의 커스텀 마커로 표시
-            createUserLocationMarker(currentPosition);
-
-            // 위치 정보를 얻은 후 초기 탭(굿즈샵) 검색 수행
-            loadTabData();
-          },
-          function (error) {
-            console.warn('위치 정보를 불러올 수 없어 기본 위치로 조회합니다.', error);
-            currentPosition = map.getCenter(); // 기본 중심 좌표 사용
-            loadTabData();
-          }
-        );
-      } else {
-        currentPosition = map.getCenter();
-        loadTabData();
-      }
-    }
-
-    /**
-     * 사용자 현재 위치를 나타내는 파란 점 마커 생성
-     */
-    function createUserLocationMarker(position) {
-      // SVG로 작성된 파란색 점 이미지 (Data URL)
-      const blueDotSvg = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(`
-        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
-          <circle cx="12" cy="12" r="9" fill="#2563EB" stroke="#ffffff" stroke-width="3"/>
-          <circle cx="12" cy="12" r="4" fill="#ffffff"/>
-        </svg>
-      `);
-
-      const markerImage = new kakao.maps.MarkerImage(
-        blueDotSvg,
-        new kakao.maps.Size(24, 24),
-        { offset: new kakao.maps.Point(12, 12) }
-      );
-
-      if (userMarker) {
-        userMarker.setMap(null);
-      }
-
-      userMarker = new kakao.maps.Marker({
-        position: position,
-        image: markerImage,
-        map: map,
-        zIndex: 2 // 검색 마커보다 위에 표시되도록 처리
-      });
-    }
-
-    /**
-     * 탭 전환 처리 함수
-     */
-    function switchTab(tabName) {
-      if (currentTab === tabName) return;
-
-      currentTab = tabName;
-
-      // 탭 버튼 active 클래스 전환
-      document.querySelectorAll('.tab-btn').forEach(btn => {
-        if (btn.dataset.tab === tabName) {
-          btn.classList.add('active');
-        } else {
-          btn.classList.remove('active');
-        }
-      });
-
-      // 기존 마커 및 리스트 초기화 후 새로 검색
-      clearPreviousData();
-      loadTabData();
-    }
-
-    /**
-     * 기존 마커 및 리스트 초기화
-     */
-    function clearPreviousData() {
-      // 마커 제거
-      markers.forEach(marker => marker.setMap(null));
-      markers = [];
-
-      // 열려있는 인포윈도우 닫기
-      if (infoWindow) {
-        infoWindow.close();
-      }
-
-      // 왼쪽 리스트 초기화
-      document.getElementById('resultsList').innerHTML = '';
-    }
-
-    /**
-     * 선택된 탭에 따라 데이터 검색 실행
-     */
-    function loadTabData() {
-      const resultsList = document.getElementById('resultsList');
-      resultsList.innerHTML = '<p class="status-msg">내 주변 장소를 찾는 중입니다...</p>';
-
-      if (currentTab === 'goods') {
-        searchGoodsShops();
-      } else if (currentTab === 'props') {
-        searchPropsShops();
-      }
-    }
-
-    /**
-     * 탭 1: 지정된 굿즈샵 목록 검색
-     */
-    function searchGoodsShops() {
-      const searchResults = [];
-      let completedCount = 0;
-
-      // 내 위치 주변을 기준으로 각 굿즈샵 개별 검색
-      goodsShopList.forEach(shopName => {
-        const searchOptions = currentPosition ? { location: currentPosition, radius: 10000 } : {};
-
-        placesService.keywordSearch(shopName, function (data, status) {
-          completedCount++;
-
-          if (status === kakao.maps.services.Status.OK && data.length > 0) {
-            // 가장 연관성이 높은 첫 번째 장소 추가
-            searchResults.push(data[0]);
-          }
-
-          // 모든 굿즈샵 검색 요청이 완료되었을 때 결과 출력
-          if (completedCount === goodsShopList.length) {
-            renderSearchResults(searchResults, 'purple');
-          }
-        }, searchOptions);
-      });
-    }
-
-    /**
-     * 탭 2: '소품샵' 키워드로 내 위치 주변 검색
-     */
-    function searchPropsShops() {
-      const searchOptions = currentPosition ? { location: currentPosition, radius: 5000 } : {};
-
-      placesService.keywordSearch('소품샵', function (data, status) {
-        if (status === kakao.maps.services.Status.OK) {
-          renderSearchResults(data, 'pink');
-        } else {
-          document.getElementById('resultsList').innerHTML = '<p class="no-result">주변에 소품샵 검색 결과가 없습니다.</p>';
-        }
-      }, searchOptions);
-    }
-
-    /**
-     * 마커용 SVG 커스텀 이미지 생성 함수 (보라색 / 분홍색)
-     */
-    function createCustomMarkerImage(colorType) {
-      // 보라색(굿즈샵): #8A2BE2, 분홍색(소품샵): #FF69B4
-      const hexColor = colorType === 'purple' ? '#8A2BE2' : '#FF69B4';
-
-      const svgString = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(`
-        <svg xmlns="http://www.w3.org/2000/svg" width="28" height="36" viewBox="0 0 28 36">
-          <path d="M14 0C6.268 0 0 6.268 0 14c0 10.5 14 22 14 22s14-11.5 14-22c0-7.732-6.268-14-14-14z" fill="${hexColor}" stroke="#ffffff" stroke-width="2"/>
-          <circle cx="14" cy="12" r="5" fill="#ffffff"/>
-        </svg>
-      `);
-
-      return new kakao.maps.MarkerImage(
-        svgString,
-        new kakao.maps.Size(28, 36),
-        { offset: new kakao.maps.Point(14, 36) }
-      );
-    }
-
-    /**
-     * 검색 결과를 화면(리스트 + 지도 마커)에 표시하는 함수
-     */
-    function renderSearchResults(places, colorType) {
-      const resultsList = document.getElementById('resultsList');
-      resultsList.innerHTML = '';
-
-      if (!places || places.length === 0) {
-        resultsList.innerHTML = '<p class="no-result">검색된 장소가 없습니다.</p>';
-        return;
-      }
-
-      const bounds = new kakao.maps.LatLngBounds();
-      const markerImage = createCustomMarkerImage(colorType);
-
-      places.forEach((place, index) => {
-        const placePosition = new kakao.maps.LatLng(place.y, place.x);
-
-        // 마커 생성 및 지정된 색상 적용
-        const marker = new kakao.maps.Marker({
-          position: placePosition,
-          image: markerImage,
-          map: map
-        });
-
-        markers.push(marker);
-        bounds.extend(placePosition);
-
-        // 결과 리스트 엘리먼트 생성
-        const itemEl = document.createElement('div');
-        itemEl.className = 'result-item';
-        itemEl.innerHTML = `
-          <div class="result-title">${index + 1}. ${place.place_name}</div>
-          <div class="result-address">${place.road_address_name || place.address_name}</div>
-          ${place.phone ? `<div class="result-phone">📞 \${place.phone}</div>` : ''}
-        `;
-
-        // 이벤트 등록: 마커 클릭 시 상세정보 팝업
-        kakao.maps.event.addListener(marker, 'click', function () {
-          showInfoWindow(marker, place);
-        });
-
-        // 이벤트 등록: 리스트 아이템 클릭 시 지도 이동 및 팝업 표시
-        itemEl.addEventListener('click', function () {
-          map.panTo(placePosition);
-          showInfoWindow(marker, place);
-        });
-
-        resultsList.appendChild(itemEl);
-      });
-
-      // 검색된 모든 마커와 내 위치가 보이도록 지도 범위 조정
-      if (currentPosition) {
-        bounds.extend(currentPosition);
-      }
+      // 검색된 모든 마커가 보이도록 지도 범위 재설정
       map.setBounds(bounds);
     }
 
